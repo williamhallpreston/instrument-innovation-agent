@@ -261,8 +261,5 @@ This project follows the [Contributor Covenant v2.1](CODE_OF_CONDUCT.md). By par
 
 ## License
 
-[MIT](LICENSE) © 2025 Your Organisation
+[MIT](LICENSE) © 2026
 
----
-
-*Built with [Claude](https://claude.ai) by Anthropic.*
