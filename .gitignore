@@ -1,0 +1,154 @@
+# ════════════════════════════════════════════════════════════════════════════
+# .gitignore — Instrument Innovation Agent
+#
+# SECURITY: The primary purpose of this file is to prevent secrets,
+# credentials, and environment-specific configs from being committed.
+# Review this file before every `git add .` on a new machine.
+# ════════════════════════════════════════════════════════════════════════════
+
+# ── SECRETS & CREDENTIALS ────────────────────────────────────────────────────
+# NEVER commit real environment files. Use .env.example (committed, no secrets)
+# and a secrets manager or CI environment for real values.
+.env
+.env.*
+!.env.example          # Allow the example template (must contain NO real values)
+
+# Private keys and certificates
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+id_dsa
+id_dsa.*
+id_ecdsa
+id_ecdsa.*
+*.ppk
+*.jks
+*.keystore
+
+# Cloud provider credential files
+.aws/credentials
+.aws/config
+gcloud/
+.gcp/
+azure.json
+.azure/
+
+# API key files (common naming patterns)
+*apikey*
+*api_key*
+*api-key*
+*secret*
+*credential*
+*token*
+# Exceptions for non-secret uses of these words:
+!src/**
+!docs/**
+!README*
+!SECURITY*
+!CONTRIBUTING*
+!CODE_OF_CONDUCT*
+!CHANGELOG*
+!*.md
+
+# ── LOCAL CONFIGURATION OVERRIDES ────────────────────────────────────────────
+# Local config should never override committed defaults silently.
+*.local
+*.local.*
+config.local.*
+settings.local.*
+
+# ── LOG FILES ─────────────────────────────────────────────────────────────────
+*.log
+*.log.*
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ── BUILD ARTIFACTS ───────────────────────────────────────────────────────────
+dist/
+build/
+out/
+.output/
+.next/
+.nuxt/
+.vite/
+.parcel-cache/
+*.bundle.js
+*.bundle.css
+*.min.js
+*.min.css
+
+# ── NODE.JS ───────────────────────────────────────────────────────────────────
+node_modules/
+.npm/
+.pnp
+.pnp.js
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+
+# ── PYTHON ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ── IDE & EDITOR METADATA ─────────────────────────────────────────────────────
+.vscode/
+!.vscode/extensions.json   # Shared extension recommendations are OK
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.fleet/
+.cursor/
+
+# ── OS METADATA ───────────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# ── TEST FIXTURES (sensitive) ─────────────────────────────────────────────────
+# Real credentials must never appear in test fixtures.
+# Use generated/mocked values only.
+tests/fixtures/real_*
+tests/fixtures/*.pem
+tests/fixtures/*.key
+__snapshots__/
+
+# ── MISCELLANEOUS ─────────────────────────────────────────────────────────────
+*.bak
+*.swp
+*.tmp
+*.temp
+.cache/
+.history/
+coverage/
+.nyc_output/

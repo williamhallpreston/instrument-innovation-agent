@@ -1,0 +1,1386 @@
+<!DOCTYPE html>
+<!--
+  Instrument Innovation Agent
+  https://github.com/your-org/instrument-innovation-agent
+
+  SECURITY: This file makes direct calls to the Anthropic API from the browser.
+  The API key is injected at build/serve time via a reverse proxy or environment-
+  aware bundler. NEVER hard-code a real key in this file or commit one to VCS.
+  See .env.example and docs/DEPLOYMENT.md for safe configuration patterns.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!--
+  SECURITY: Content Security Policy.
+  - script-src 'self' only (no inline scripts in production — move JS to /src/app.js)
+  - style-src allows Google Fonts and inline styles required by the single-file build
+  - connect-src locked to Anthropic API + Google Fonts only
+  - frame-ancestors 'none' prevents clickjacking
+  Tighten further by removing 'unsafe-inline' once JS is extracted to an external file.
+-->
+<meta http-equiv="Content-Security-Policy"
+  content="
+    default-src 'none';
+    script-src 'self' 'unsafe-inline';
+    style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+    font-src https://fonts.gstatic.com;
+    connect-src https://api.anthropic.com https://fonts.googleapis.com https://fonts.gstatic.com;
+    img-src 'self' data:;
+    frame-ancestors 'none';
+  ">
+<!-- SECURITY: Prevents MIME-type sniffing attacks -->
+<meta http-equiv="X-Content-Type-Options" content="nosniff">
+<!-- SECURITY: Prevents this page from being embedded in an iframe -->
+<meta http-equiv="X-Frame-Options" content="DENY">
+<!-- SECURITY: Controls Referer header — don't leak URL to third-party fonts -->
+<meta name="referrer" content="strict-origin">
+
+<title>Instrument Innovation Agent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link
+  href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=DM+Mono:wght@300;400;500&family=Cormorant+Garamond:ital,wght@0,300;0,600;1,300&display=swap"
+  rel="stylesheet">
+<style>
+  /* ─── DESIGN TOKENS ─── */
+  :root {
+    --ink:        #0e0c0a;
+    --paper:      #f5f0e8;
+    --amber:      #c8832a;
+    --amber-pale: #f2e0c0;
+    --amber-deep: #8a5a1a;
+    --rust:       #b04830;
+    --sage:       #4a6b5a;
+    --line:       rgba(14,12,10,0.12);
+
+    --font-display: 'Playfair Display', Georgia, serif;
+    --font-body:    'Cormorant Garamond', Georgia, serif;
+    --font-mono:    'DM Mono', 'Courier New', monospace;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background:   var(--paper);
+    color:        var(--ink);
+    font-family:  var(--font-body);
+    font-size:    18px;
+    line-height:  1.65;
+    min-height:   100vh;
+    overflow-x:   hidden;
+  }
+
+  /* Grain overlay — purely decorative, pointer-events disabled */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 9999;
+    opacity: 0.5;
+    /* aria-hidden applied in HTML; purely cosmetic */
+  }
+
+  /* Decorative left border rule */
+  body::after {
+    content: '';
+    position: fixed;
+    top: 0; left: 0;
+    width: 2px;
+    height: 100%;
+    background: linear-gradient(to bottom, transparent, var(--amber) 20%, var(--amber) 80%, transparent);
+    opacity: 0.4;
+    z-index: 100;
+    pointer-events: none;
+  }
+
+  /* ─── HEADER ─── */
+  header {
+    border-bottom: 1px solid var(--line);
+    padding: 2rem 3rem 1.5rem 4rem;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    position: relative;
+    animation: fadeDown 0.8s ease both;
+  }
+  header::after {
+    content: '';
+    position: absolute;
+    bottom: -3px; left: 0; right: 0;
+    height: 1px;
+    background: var(--amber);
+    opacity: 0.4;
+  }
+
+  .masthead-label {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--amber);
+    margin-bottom: 0.4rem;
+  }
+
+  h1 {
+    font-family: var(--font-display);
+    font-size: clamp(1.8rem, 3vw, 2.8rem);
+    font-weight: 900;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+  }
+  h1 em { font-style: italic; color: var(--amber); }
+
+  .header-meta {
+    text-align: right;
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    color: rgba(14,12,10,0.4);
+    letter-spacing: 0.1em;
+    line-height: 1.8;
+  }
+
+  /* ─── LAYOUT ─── */
+  .layout {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    min-height: calc(100vh - 90px);
+  }
+
+  /* ─── SIDEBAR ─── */
+  aside {
+    border-right: 1px solid var(--line);
+    padding: 2rem 1.5rem 2rem 3rem;
+    position: sticky;
+    top: 0;
+    height: calc(100vh - 90px);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+    animation: fadeLeft 0.8s 0.2s ease both;
+  }
+
+  .phase-nav-label {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: var(--amber);
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .phase-list { list-style: none; display: flex; flex-direction: column; gap: 0.2rem; }
+  .phase-list li { position: relative; }
+
+  .phase-btn {
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0.5rem 0.75rem;
+    border-radius: 3px;
+    font-family: var(--font-body);
+    font-size: 0.88rem;
+    color: rgba(14,12,10,0.6);
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+  .phase-btn:hover  { color: var(--ink); background: rgba(200,131,42,0.08); }
+  .phase-btn.active { color: var(--amber-deep); font-weight: 600; background: rgba(200,131,42,0.12); }
+
+  .phase-num {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    background: var(--amber);
+    color: white;
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    transition: all 0.2s;
+  }
+  .phase-btn.active .phase-num  { background: var(--amber-deep); }
+  .phase-btn.complete .phase-num { background: var(--sage); }
+  .phase-btn.complete { color: rgba(14,12,10,0.5); }
+
+  .sidebar-controls { margin-top: auto; display: flex; flex-direction: column; gap: 0.75rem; }
+
+  .status-orb {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--sage);
+    display: inline-block;
+    margin-right: 0.4rem;
+    animation: pulse-orb 2s ease-in-out infinite;
+  }
+  .status-orb.thinking { background: var(--amber); }
+  .status-orb.idle     { background: rgba(14,12,10,0.2); animation: none; }
+
+  @keyframes pulse-orb {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%      { opacity: 0.5; transform: scale(0.8); }
+  }
+
+  .agent-status {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.1em;
+    color: rgba(14,12,10,0.5);
+  }
+
+  /* ─── MAIN ─── */
+  main {
+    padding: 2.5rem 4rem 4rem 3rem;
+    max-width: 900px;
+    animation: fadeRight 0.8s 0.3s ease both;
+  }
+
+  /* ─── INTRO PANEL ─── */
+  .intro-panel {
+    background: var(--ink);
+    color: var(--paper);
+    padding: 2.5rem 3rem;
+    margin-bottom: 2.5rem;
+    position: relative;
+    overflow: hidden;
+  }
+  .intro-panel::before {
+    content: '♪';
+    position: absolute;
+    right: 2rem; top: 50%;
+    transform: translateY(-50%);
+    font-size: 8rem;
+    opacity: 0.05;
+    font-family: serif;
+    /* aria-hidden set on element below */
+  }
+  .intro-panel h2 {
+    font-family: var(--font-display);
+    font-size: 1.4rem;
+    font-weight: 400;
+    font-style: italic;
+    margin-bottom: 0.75rem;
+    color: var(--amber-pale);
+  }
+  .intro-panel p { font-size: 0.95rem; opacity: 0.75; max-width: 560px; line-height: 1.7; }
+
+  /* ─── QUERY INPUT ─── */
+  .query-area { margin-bottom: 2rem; position: relative; }
+
+  .query-label {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--amber);
+    margin-bottom: 0.5rem;
+    display: block;
+  }
+
+  .query-wrapper {
+    position: relative;
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--amber);
+    background: white;
+    transition: box-shadow 0.2s;
+  }
+  .query-wrapper:focus-within { box-shadow: 4px 4px 0 var(--amber-pale); }
+
+  textarea {
+    width: 100%;
+    min-height: 80px;
+    padding: 1rem 1.25rem;
+    border: none;
+    background: transparent;
+    font-family: var(--font-body);
+    font-size: 1rem;
+    color: var(--ink);
+    resize: vertical;
+    outline: none;
+    line-height: 1.6;
+  }
+
+  .query-actions {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    padding: 0.5rem 1rem;
+    border-top: 1px solid var(--line);
+    background: rgba(245,240,232,0.5);
+    flex-wrap: wrap;
+  }
+
+  .btn-run {
+    background: var(--ink);
+    color: var(--paper);
+    border: none;
+    padding: 0.5rem 1.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-run:hover    { background: var(--amber-deep); }
+  .btn-run:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .btn-preset {
+    background: none;
+    border: 1px solid var(--line);
+    padding: 0.35rem 0.8rem;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.1em;
+    cursor: pointer;
+    color: rgba(14,12,10,0.5);
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+  .btn-preset:hover { border-color: var(--amber); color: var(--amber-deep); }
+
+  /* ─── PHASE SECTIONS ─── */
+  .phase-section {
+    margin-bottom: 3rem;
+    opacity: 0;
+    transform: translateY(12px);
+    animation: phaseIn 0.5s ease both;
+  }
+  @keyframes phaseIn { to { opacity: 1; transform: translateY(0); } }
+
+  .phase-header {
+    display: flex;
+    align-items: baseline;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--line);
+    position: relative;
+  }
+  .phase-header::after {
+    content: '';
+    position: absolute;
+    bottom: -2px; left: 0;
+    width: 60px; height: 2px;
+    background: var(--amber);
+  }
+
+  .phase-tag {
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    background: var(--amber);
+    color: white;
+    padding: 0.2rem 0.5rem;
+    flex-shrink: 0;
+  }
+
+  .phase-title {
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+
+  /* ─── MARKET GRID ─── */
+  .market-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    margin-bottom: 1.5rem;
+  }
+
+  .market-cell { background: var(--paper); padding: 1rem 1.1rem; transition: background 0.2s; }
+  .market-cell:hover { background: var(--amber-pale); }
+
+  .market-cell-label {
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--amber);
+    margin-bottom: 0.35rem;
+  }
+
+  .market-cell-value { font-size: 0.88rem; color: var(--ink); line-height: 1.5; }
+
+  /* ─── GAP CARDS ─── */
+  .gap-card { border: 1px solid var(--line); border-left: 4px solid var(--amber); margin-bottom: 1.25rem; overflow: hidden; transition: box-shadow 0.2s; }
+  .gap-card:hover { box-shadow: 3px 3px 0 var(--amber-pale); }
+
+  .gap-card-header {
+    padding: 0.9rem 1.25rem;
+    background: rgba(200,131,42,0.06);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .gap-card-icon { font-size: 1.2rem; width: 2rem; text-align: center; }
+  .gap-card-title { font-family: var(--font-display); font-weight: 700; font-size: 1.05rem; }
+
+  .gap-score {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.1em;
+    background: var(--ink);
+    color: var(--amber);
+    padding: 0.2rem 0.5rem;
+  }
+
+  .gap-card-body {
+    padding: 1rem 1.25rem;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+    font-size: 0.88rem;
+  }
+
+  .gap-field strong {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--amber-deep);
+    margin-bottom: 0.2rem;
+  }
+
+  /* ─── INSTRUMENT BRIEFS ─── */
+  .brief-card { border: 1px solid var(--line); margin-bottom: 2rem; position: relative; overflow: hidden; }
+
+  .brief-header {
+    padding: 1.5rem 1.75rem 1rem;
+    border-bottom: 1px solid var(--line);
+    background: var(--ink);
+    color: var(--paper);
+  }
+
+  .brief-name {
+    font-family: var(--font-display);
+    font-size: 1.6rem;
+    font-weight: 900;
+    letter-spacing: -0.02em;
+    margin-bottom: 0.3rem;
+  }
+
+  .brief-tagline { font-style: italic; color: var(--amber-pale); font-size: 0.95rem; opacity: 0.85; }
+
+  .brief-body {
+    padding: 1.5rem 1.75rem;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.25rem;
+  }
+
+  .brief-field { font-size: 0.9rem; }
+  .brief-field strong {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--amber);
+    margin-bottom: 0.3rem;
+  }
+
+  .brief-full { grid-column: 1 / -1; }
+
+  .brief-score-bar { margin-top: 0.4rem; height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
+  .brief-score-fill { height: 100%; background: linear-gradient(to right, var(--amber), var(--rust)); border-radius: 2px; transition: width 1s ease; }
+
+  /* ─── RANKING TABLE ─── */
+  .rank-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; margin-top: 1rem; }
+  .rank-table th {
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--amber);
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 2px solid var(--ink);
+  }
+  .rank-table td { padding: 0.65rem 0.75rem; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  .rank-table tr:last-child td { border-bottom: none; }
+  .rank-table tr:hover td { background: var(--amber-pale); }
+
+  .rank-num { font-family: var(--font-display); font-size: 1.5rem; font-weight: 900; color: var(--amber); line-height: 1; }
+
+  .score-chip {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    background: var(--ink);
+    color: var(--amber);
+    padding: 0.15rem 0.4rem;
+    letter-spacing: 0.05em;
+  }
+
+  /* ─── STREAMING PANEL ─── */
+  .stream-container { background: var(--ink); padding: 1.5rem 2rem; margin-bottom: 2rem; position: relative; overflow: hidden; }
+
+  .stream-label {
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: var(--amber);
+    margin-bottom: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  /* SECURITY: stream-text uses textContent assignment (not innerHTML) in JS,
+     so streaming output from the API is never interpreted as HTML. */
+  .stream-text {
+    font-family: var(--font-body);
+    font-size: 0.95rem;
+    color: rgba(245,240,232,0.9);
+    line-height: 1.8;
+    white-space: pre-wrap;
+    max-height: 400px;
+    overflow-y: auto;
+    /* word-break prevents long tokens from overflowing the container */
+    word-break: break-word;
+  }
+
+  .cursor-blink {
+    display: inline-block;
+    width: 2px; height: 1em;
+    background: var(--amber);
+    vertical-align: text-bottom;
+    animation: blink 1s step-end infinite;
+    margin-left: 2px;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* ─── PROGRESS BAR ─── */
+  .progress-bar { height: 2px; background: var(--line); margin: 1.5rem 0; position: relative; }
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(to right, var(--amber), var(--rust));
+    transition: width 0.5s ease;
+    position: relative;
+  }
+  .progress-fill::after {
+    content: '';
+    position: absolute;
+    right: 0; top: -3px;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--rust);
+  }
+
+  /* ─── EMPTY STATE ─── */
+  .empty-state { text-align: center; padding: 4rem 2rem; opacity: 0.4; }
+  .empty-state .big-symbol { font-size: 5rem; line-height: 1; margin-bottom: 1rem; font-family: serif; }
+  .empty-state p { font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.15em; text-transform: uppercase; }
+
+  /* ─── MISC ─── */
+  .prose { font-size: 0.95rem; line-height: 1.8; color: rgba(14,12,10,0.85); }
+  .prose p { margin-bottom: 0.75rem; }
+
+  @keyframes fadeDown  { from { opacity: 0; transform: translateY(-16px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes fadeLeft  { from { opacity: 0; transform: translateX(-16px); } to { opacity: 1; transform: translateX(0); } }
+  @keyframes fadeRight { from { opacity: 0; transform: translateX(16px);  } to { opacity: 1; transform: translateX(0); } }
+
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--amber-pale); border-radius: 3px; }
+
+  .error-banner {
+    background: var(--rust);
+    color: white;
+    padding: 0.75rem 1.25rem;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+    margin-bottom: 1rem;
+  }
+
+  .ornament-divider { text-align: center; font-size: 1.2rem; color: var(--amber); opacity: 0.4; margin: 1.5rem 0; letter-spacing: 0.5em; }
+
+  .tag {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    border: 1px solid var(--amber);
+    color: var(--amber-deep);
+    padding: 0.1rem 0.4rem;
+    margin: 0.1rem;
+  }
+
+  .feasibility-bar { display: flex; gap: 3px; margin-top: 0.3rem; }
+  .feasibility-pip { width: 18px; height: 6px; background: var(--line); border-radius: 1px; transition: background 0.3s; }
+  .feasibility-pip.on { background: var(--amber); }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="masthead-label">AI-Powered Research Engine</div>
+    <h1>The <em>Instrument</em><br>Innovation Agent</h1>
+  </div>
+  <div class="header-meta" aria-label="Build metadata">
+    <div>ANTHROPIC / CLAUDE SONNET 4</div>
+    <div>ACOUSTIC × DIGITAL × CULTURAL</div>
+    <div id="ts-display" aria-live="polite">—</div>
+  </div>
+</header>
+
+<div class="layout">
+  <!-- SIDEBAR -->
+  <aside aria-label="Navigation and controls">
+    <div>
+      <div class="phase-nav-label">Analysis Phases</div>
+      <ul class="phase-list" id="phase-list" role="navigation" aria-label="Phase navigation">
+        <li><button class="phase-btn active" data-phase="1" aria-current="step">
+          <span class="phase-num" aria-hidden="true">1</span> Market Landscape
+        </button></li>
+        <li><button class="phase-btn" data-phase="2">
+          <span class="phase-num" aria-hidden="true">2</span> Gap Identification
+        </button></li>
+        <li><button class="phase-btn" data-phase="3">
+          <span class="phase-num" aria-hidden="true">3</span> Instrument Briefs
+        </button></li>
+        <li><button class="phase-btn" data-phase="4">
+          <span class="phase-num" aria-hidden="true">4</span> Priority Ranking
+        </button></li>
+      </ul>
+    </div>
+
+    <div>
+      <div class="phase-nav-label">Focus Area</div>
+      <fieldset style="border:none;margin-top:0.5rem;display:flex;flex-direction:column;gap:0.4rem;">
+        <legend style="display:none">Focus areas</legend>
+        <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.82rem;cursor:pointer;">
+          <input type="checkbox" id="chk-western" checked> Western Markets
+        </label>
+        <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.82rem;cursor:pointer;">
+          <input type="checkbox" id="chk-nonwestern" checked> Non-Western / Global
+        </label>
+        <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.82rem;cursor:pointer;">
+          <input type="checkbox" id="chk-accessible" checked> Accessibility Needs
+        </label>
+        <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.82rem;cursor:pointer;">
+          <input type="checkbox" id="chk-emerging" checked> Emerging Genres
+        </label>
+        <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.82rem;cursor:pointer;">
+          <input type="checkbox" id="chk-ai" checked> AI-Augmented
+        </label>
+      </fieldset>
+    </div>
+
+    <div class="sidebar-controls">
+      <div class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progress-wrapper">
+        <div class="progress-fill" id="global-progress" style="width:0%"></div>
+      </div>
+      <div class="agent-status" aria-live="polite">
+        <span class="status-orb idle" id="orb" aria-hidden="true"></span>
+        <span id="status-text">Ready to analyze</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN CONTENT -->
+  <main>
+    <div class="intro-panel">
+      <h2>Musical instrument innovation, rigorously examined.</h2>
+      <p>
+        This agent conducts a four-phase analysis of the global instrument market — surveying the
+        landscape, identifying genuine innovation gaps, designing instrument concepts, and ranking
+        opportunities by composite opportunity score.
+      </p>
+    </div>
+
+    <!-- Query Input -->
+    <div class="query-area">
+      <label class="query-label" for="query-input">Research Query / Focus Directive</label>
+      <div class="query-wrapper">
+        <!--
+          SECURITY: maxlength prevents runaway prompt injection via the textarea.
+          Input is also sanitised server-side if a proxy layer is used.
+          The buildUserMessage() function does not interpolate this value into HTML.
+        -->
+        <textarea
+          id="query-input"
+          maxlength="800"
+          placeholder="e.g., 'Focus on instruments for players with physical disabilities' or 'Explore gaps in West African music traditions' — or leave blank for full analysis..."
+          aria-describedby="query-hint"
+        ></textarea>
+        <div class="query-actions">
+          <button class="btn-run" id="run-btn" onclick="runAnalysis()">▶ Run Full Analysis</button>
+          <button class="btn-preset" onclick="setPreset('accessibility')">Accessibility</button>
+          <button class="btn-preset" onclick="setPreset('nonwestern')">Non-Western Traditions</button>
+          <button class="btn-preset" onclick="setPreset('electronic')">Electronic Frontiers</button>
+          <button class="btn-preset" onclick="setPreset('children')">Children &amp; Education</button>
+        </div>
+      </div>
+      <div id="query-hint" style="font-family:var(--font-mono);font-size:0.58rem;color:rgba(14,12,10,0.35);margin-top:0.35rem;letter-spacing:0.1em;">
+        Max 800 characters. Your query is sent to the Anthropic API — do not include personal data.
+      </div>
+    </div>
+
+    <!-- Output -->
+    <div id="output-area" aria-live="polite" aria-label="Analysis results">
+      <div class="empty-state">
+        <div class="big-symbol" aria-hidden="true">♩</div>
+        <p>Run an analysis to begin</p>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+'use strict';
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   SECURITY NOTES
+   ─────────────────────────────────────────────────────────────────────────────
+   1. API KEY: No API key is embedded here. In production, all /v1/messages
+      requests MUST be routed through a server-side proxy that injects the key
+      from an environment variable. Direct browser-to-Anthropic calls are
+      acceptable in local development only (key injected via .env / build tool).
+
+   2. XSS PREVENTION: All data from the API response is rendered through the
+      esc() function before being placed in innerHTML. Numeric fields (scores,
+      ranks) are cast to integers with safeInt() before interpolation.
+      The streaming preview uses textContent, never innerHTML.
+
+   3. INPUT VALIDATION: User textarea input has a maxlength=800 attribute and
+      is trimmed + length-checked in JS before being sent to the API.
+
+   4. ERROR MESSAGES: err.message is escaped before display in the DOM.
+
+   5. RATE LIMITING: runAnalysis() disables the Run button while a request is
+      in flight, preventing concurrent duplicate requests.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+// ─── CONFIG ───────────────────────────────────────────────────────────────────
+// SECURITY: In production, replace this with a call to your own backend proxy.
+// Never ship a real API key here — this constant is a placeholder so the code
+// compiles; the actual value comes from the proxy or a build-time env injection.
+const API_ENDPOINT = 'https://api.anthropic.com/v1/messages';
+const MODEL        = 'claude-sonnet-4-20250514';
+const MAX_TOKENS   = 6000;
+
+// Maximum length we will accept from the textarea before rejecting the request.
+const MAX_QUERY_LENGTH = 800;
+
+// ─── PRESET QUERIES ───────────────────────────────────────────────────────────
+const PRESETS = Object.freeze({
+  accessibility:
+    'Focus especially on instruments designed for players with physical disabilities, motor limitations, or sensory differences. Emphasise haptic feedback, alternative interfaces, and adaptive design.',
+  nonwestern:
+    'Prioritise gaps in non-Western musical traditions — particularly West African, Southeast Asian, Middle Eastern, and Indigenous music systems. Look for instruments that bridge traditional and contemporary practice.',
+  electronic:
+    'Explore the frontier where electronics, software, and physical gesture meet. Focus on instruments with no acoustic precedent — pure electronic expression that goes beyond MIDI controllers and synthesisers.',
+  children:
+    'Focus on instrument innovation for children aged 4–12, including educational contexts, developmental stages, and classroom use. Consider instruments that grow with the player.',
+});
+
+/**
+ * Populates the query textarea with a preset string.
+ * SECURITY: presets are static constants — no user input involved.
+ * @param {string} key - Key into the PRESETS map.
+ */
+function setPreset(key) {
+  const val = PRESETS[key];
+  if (val) document.getElementById('query-input').value = val;
+}
+
+// ─── TIMESTAMP ────────────────────────────────────────────────────────────────
+(function initTimestamp() {
+  const el = document.getElementById('ts-display');
+  if (el) {
+    el.textContent = new Date().toLocaleDateString('en-US', {
+      year: 'numeric', month: 'short', day: 'numeric',
+    });
+  }
+})();
+
+// ─── PHASE NAVIGATION ─────────────────────────────────────────────────────────
+document.querySelectorAll('.phase-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const phaseId = 'phase-' + btn.dataset.phase;
+    const el = document.getElementById(phaseId);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+});
+
+// ─── UI HELPERS ───────────────────────────────────────────────────────────────
+function setStatus(text, state = 'thinking') {
+  const statusEl = document.getElementById('status-text');
+  const orb      = document.getElementById('orb');
+  if (statusEl) statusEl.textContent = text;
+  if (orb)      orb.className = 'status-orb ' + state;
+}
+
+function setProgress(pct) {
+  const fill    = document.getElementById('global-progress');
+  const wrapper = document.getElementById('progress-wrapper');
+  const clamped = Math.max(0, Math.min(100, pct));
+  if (fill)    fill.style.width = clamped + '%';
+  if (wrapper) wrapper.setAttribute('aria-valuenow', clamped);
+}
+
+function markPhaseActive(n) {
+  document.querySelectorAll('.phase-btn').forEach(b => {
+    const pn = parseInt(b.dataset.phase, 10);
+    b.classList.toggle('complete', pn < n);
+    b.classList.toggle('active',   pn === n);
+    b.setAttribute('aria-current', pn === n ? 'step' : 'false');
+  });
+}
+
+function markPhaseComplete(n) {
+  document.querySelectorAll('.phase-btn').forEach(b => {
+    if (parseInt(b.dataset.phase, 10) <= n) b.classList.add('complete');
+  });
+}
+
+// ─── SANITISATION HELPERS ─────────────────────────────────────────────────────
+/**
+ * Escapes a value for safe insertion into innerHTML.
+ * SECURITY: Any string from the API must pass through esc() before use in
+ * template literals assigned to innerHTML.
+ * @param {*} s - Value to escape.
+ * @returns {string}
+ */
+function esc(s) {
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replace(/&/g,  '&amp;')
+    .replace(/</g,  '&lt;')
+    .replace(/>/g,  '&gt;')
+    .replace(/"/g,  '&quot;')
+    .replace(/'/g,  '&#x27;');
+}
+
+/**
+ * Safely casts a value to a bounded integer for use in HTML attributes/content.
+ * SECURITY: Prevents floating-point or string injection in numeric fields.
+ * @param {*} val       - Value from API response.
+ * @param {number} min  - Minimum allowed value.
+ * @param {number} max  - Maximum allowed value.
+ * @param {number} fallback
+ * @returns {number}
+ */
+function safeInt(val, min = 0, max = 100, fallback = 0) {
+  const n = parseInt(val, 10);
+  if (isNaN(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+}
+
+/**
+ * Returns a safe CSS hex colour from a known-safe allow-list.
+ * SECURITY: tierColor was previously interpolated directly into a style
+ * attribute. Restricting to an allow-list prevents CSS injection.
+ * @param {string} tier
+ * @returns {string}
+ */
+const TIER_COLOURS = Object.freeze({
+  'Beginner':     '#4a6b5a',
+  'Prosumer':     '#c8832a',
+  'Professional': '#b04830',
+  'Bespoke':      '#0e0c0a',
+});
+function tierColour(tier) {
+  return TIER_COLOURS[tier] || '#c8832a';
+}
+
+// ─── PROMPT BUILDERS ──────────────────────────────────────────────────────────
+/**
+ * Builds the system prompt incorporating checked focus areas.
+ * @returns {string}
+ */
+function buildSystemPrompt() {
+  const focusAreas = [
+    ['chk-western',    'Western Markets'],
+    ['chk-nonwestern', 'Non-Western / Global'],
+    ['chk-accessible', 'Accessibility Needs'],
+    ['chk-emerging',   'Emerging Genres'],
+    ['chk-ai',         'AI-Augmented'],
+  ]
+    .filter(([id]) => document.getElementById(id)?.checked)
+    .map(([, label]) => label)
+    .join(', ') || 'All areas';
+
+  return `You are an expert musical instrument innovation agent with deep knowledge spanning instrument design, music technology, acoustic engineering, materials science, and global music markets.
+
+Your mission: Conduct a rigorous, multi-dimensional market analysis of the musical instrument landscape to identify meaningful innovation gaps — instruments or instrument categories that should exist but don't yet (or exist only in primitive/inaccessible form).
+
+Focus areas selected by the user: ${focusAreas}.
+
+CRITICAL OUTPUT FORMAT: You MUST respond with a single valid JSON object. No markdown. No prose outside the JSON. No code fences.
+
+The JSON must exactly match this schema:
+{
+  "phase1": {
+    "summary": "2-3 sentence overview of current market landscape",
+    "categories": [
+      { "name": "Category Name", "size": "market size or descriptor", "trend": "Growing|Stable|Declining", "notes": "key insight" }
+    ],
+    "keyTensions": ["tension 1", "tension 2", "tension 3"]
+  },
+  "phase2": {
+    "gaps": [
+      {
+        "id": "gap-1",
+        "title": "Gap Title",
+        "icon": "single emoji",
+        "unmetNeed": "what sound/expression is impossible or impractical",
+        "techFeasibility": 3,
+        "demandSignal": "evidence of latent demand",
+        "competitiveWhitespace": "why this has not been built",
+        "culturalResonance": "cultural context",
+        "overallScore": 8
+      }
+    ]
+  },
+  "phase3": {
+    "briefs": [
+      {
+        "id": "brief-1",
+        "name": "Instrument Name",
+        "tagline": "short evocative tagline",
+        "targetPlayer": "who plays it",
+        "coreInnovation": "what makes it genuinely new",
+        "soundCapabilities": "expressive range and character",
+        "materials": "proposed construction",
+        "priceTier": "Beginner|Prosumer|Professional|Bespoke",
+        "goToMarket": "path to market",
+        "risks": "key open questions and risks",
+        "opportunityScore": 74
+      }
+    ]
+  },
+  "phase4": {
+    "rankedOpportunities": [
+      {
+        "rank": 1,
+        "instrumentId": "brief-1",
+        "name": "Instrument Name",
+        "innovationImpact": 9,
+        "marketSize": 7,
+        "buildFeasibility": 8,
+        "culturalTiming": 9,
+        "compositeScore": 82,
+        "rationale": "2-3 sentences on why this ranks here"
+      }
+    ],
+    "conclusion": "2-3 sentence synthesis of the overall opportunity landscape"
+  }
+}
+
+Generate exactly 5 innovation gaps in phase2 and 5 instrument briefs in phase3 (one per gap). Rank all 5 in phase4. All numeric fields must be plain integers (no strings). Be specific, novel, and non-incremental. Avoid generic ideas. Prioritise genuine innovation over obvious updates.`;
+}
+
+/**
+ * Builds and validates the user message before sending to the API.
+ * SECURITY: Enforces max length and strips leading/trailing whitespace.
+ * @returns {string|null} The validated message, or null if invalid.
+ */
+function buildUserMessage() {
+  const raw = (document.getElementById('query-input')?.value || '').trim();
+
+  if (raw.length > MAX_QUERY_LENGTH) {
+    return null; // Caller should show an error
+  }
+
+  const focusNote = raw
+    ? `Conduct the full four-phase musical instrument innovation analysis. Additional focus directive: ${raw}`
+    : 'Conduct the full four-phase musical instrument innovation analysis across all market dimensions. Be specific and ambitious.';
+
+  return focusNote;
+}
+
+// ─── MAIN ANALYSIS RUNNER ─────────────────────────────────────────────────────
+/**
+ * Initiates a streaming analysis request to the Anthropic API.
+ * SECURITY: Button is disabled for the duration to prevent concurrent requests.
+ *           All API response text is streamed into a textContent node, then
+ *           parsed as JSON and sanitised before any DOM insertion.
+ */
+async function runAnalysis() {
+  const btn    = document.getElementById('run-btn');
+  const output = document.getElementById('output-area');
+
+  // ── Input validation ──────────────────────────────────────────────────────
+  const userMsg = buildUserMessage();
+  if (userMsg === null) {
+    output.innerHTML = `<div class="error-banner">${esc('Query exceeds maximum length of ' + MAX_QUERY_LENGTH + ' characters.')}</div>`;
+    return;
+  }
+
+  // ── Lock UI ───────────────────────────────────────────────────────────────
+  btn.disabled = true;
+  setStatus('Running analysis…', 'thinking');
+  setProgress(5);
+  markPhaseActive(1);
+
+  // ── Build streaming container ─────────────────────────────────────────────
+  const streamContainer = document.createElement('div');
+  streamContainer.className = 'stream-container';
+  streamContainer.innerHTML = `
+    <div class="stream-label">
+      <span class="status-orb thinking" aria-hidden="true"></span>
+      Agent Thinking
+    </div>`;
+
+  // SECURITY: Use a <pre> with textContent so streamed API output is never
+  // parsed as HTML. The cursor blink span is appended as a DOM node.
+  const streamPre = document.createElement('pre');
+  streamPre.className = 'stream-text';
+  streamPre.setAttribute('aria-live', 'off'); // prevent screen-reader flood during stream
+  streamContainer.appendChild(streamPre);
+
+  const cursorSpan = document.createElement('span');
+  cursorSpan.className = 'cursor-blink';
+  cursorSpan.setAttribute('aria-hidden', 'true');
+  streamPre.appendChild(cursorSpan);
+
+  output.innerHTML = '';
+  output.appendChild(streamContainer);
+
+  let accumulated = '';
+
+  try {
+    const response = await fetch(API_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model:      MODEL,
+        max_tokens: MAX_TOKENS,
+        stream:     true,
+        system:     buildSystemPrompt(),
+        messages:   [{ role: 'user', content: userMsg }],
+      }),
+    });
+
+    if (!response.ok) {
+      // SECURITY: Parse error body safely; do not expose raw response text.
+      let errMsg = `API error ${response.status}`;
+      try {
+        const errBody = await response.json();
+        // Only expose the sanitised message string, not the full object.
+        if (errBody?.error?.message) errMsg = errBody.error.message.slice(0, 200);
+      } catch (_) { /* ignore parse failures */ }
+      throw new Error(errMsg);
+    }
+
+    const reader  = response.body.getReader();
+    const decoder = new TextDecoder();
+    let   buffer  = '';
+
+    setProgress(15);
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop(); // retain incomplete line
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = line.slice(6).trim();
+        if (data === '[DONE]') continue;
+
+        try {
+          const evt = JSON.parse(data);
+          if (evt.type === 'content_block_delta' && evt.delta?.text) {
+            accumulated += evt.delta.text;
+
+            // SECURITY: Assign to textContent, not innerHTML.
+            // This ensures streamed API content cannot execute as markup.
+            const preview = accumulated.length > 500
+              ? '…' + accumulated.slice(-400)
+              : accumulated;
+            streamPre.textContent = preview;
+            streamPre.appendChild(cursorSpan); // re-attach cursor after textContent reset
+            streamPre.scrollTop = streamPre.scrollHeight;
+
+            const approxPct = Math.min(85, 15 + (accumulated.length / 55));
+            setProgress(approxPct);
+          }
+        } catch (_) { /* ignore malformed SSE chunks */ }
+      }
+    }
+
+    setProgress(90);
+    setStatus('Parsing results…', 'thinking');
+
+    // ── Parse JSON ───────────────────────────────────────────────────────────
+    let parsed;
+    try {
+      // Strip any accidental markdown fences the model might have added.
+      const clean = accumulated.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+      parsed = JSON.parse(clean);
+    } catch (e) {
+      // SECURITY: Do not echo raw accumulated content into the DOM.
+      throw new Error('Agent returned malformed JSON. Please try again.');
+    }
+
+    // ── Validate top-level shape ──────────────────────────────────────────────
+    if (!parsed?.phase1 || !parsed?.phase2 || !parsed?.phase3 || !parsed?.phase4) {
+      throw new Error('Incomplete response structure from agent. Please try again.');
+    }
+
+    setProgress(100);
+    setStatus('Analysis complete', 'active');
+    renderResults(parsed);
+
+  } catch (err) {
+    // SECURITY: esc() applied to err.message before innerHTML insertion.
+    output.innerHTML = `
+      <div class="error-banner">Error: ${esc(err.message)}</div>
+      <div class="empty-state">
+        <div class="big-symbol" aria-hidden="true">♯</div>
+        <p>Analysis failed — please try again</p>
+      </div>`;
+    setStatus('Error — ready to retry', 'idle');
+    setProgress(0);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ─── RENDER ORCHESTRATOR ──────────────────────────────────────────────────────
+function renderResults(data) {
+  const output = document.getElementById('output-area');
+  output.innerHTML = '';
+
+  output.appendChild(renderPhase1(data.phase1));
+  output.appendChild(renderPhase2(data.phase2));
+  output.appendChild(renderPhase3(data.phase3));
+  output.appendChild(renderPhase4(data.phase4));
+
+  // Animate score bars after a short delay to allow layout to settle.
+  setTimeout(() => {
+    document.querySelectorAll('.brief-score-fill').forEach(el => {
+      const width = safeInt(el.dataset.width, 0, 100, 0);
+      el.style.width = width + '%';
+    });
+  }, 120);
+}
+
+/**
+ * Creates a section wrapper for a phase.
+ * SECURITY: num is always a literal integer (1-4) from this codebase.
+ *           title is a static string constant, not user input.
+ */
+function phaseWrapper(num, title, contentEl) {
+  const section = document.createElement('div');
+  section.className = 'phase-section';
+  section.id = 'phase-' + num;
+  section.style.animationDelay = (num * 0.15) + 's';
+
+  // title is a static string from renderPhaseN callers — safe for textContent.
+  const header = document.createElement('div');
+  header.className = 'phase-header';
+
+  const tag = document.createElement('span');
+  tag.className = 'phase-tag';
+  tag.textContent = 'Phase ' + num;
+
+  const titleEl = document.createElement('span');
+  titleEl.className = 'phase-title';
+  titleEl.textContent = title;
+
+  header.appendChild(tag);
+  header.appendChild(titleEl);
+  section.appendChild(header);
+  section.appendChild(contentEl);
+
+  markPhaseComplete(num);
+  return section;
+}
+
+// ─── PHASE 1: MARKET LANDSCAPE ────────────────────────────────────────────────
+function renderPhase1(p1) {
+  const div = document.createElement('div');
+  if (!p1) return div;
+
+  const cats = (p1.categories || []).map(c => `
+    <div class="market-cell">
+      <div class="market-cell-label">${esc(c.name)}</div>
+      <div class="market-cell-value">
+        <span class="tag">${esc(c.trend)}</span><br>
+        <span style="font-size:0.82rem;color:rgba(14,12,10,0.6)">${esc(c.size)}</span><br>
+        <span style="font-size:0.85rem;margin-top:0.3rem;display:block">${esc(c.notes)}</span>
+      </div>
+    </div>`).join('');
+
+  const tensions = (p1.keyTensions || []).map((t, i) => `
+    <div style="display:flex;gap:0.75rem;align-items:flex-start;padding:0.5rem 0;border-bottom:1px solid var(--line)">
+      <span style="font-family:var(--font-mono);font-size:0.65rem;color:var(--amber);flex-shrink:0;padding-top:0.1rem">0${i + 1}</span>
+      <span style="font-size:0.9rem">${esc(t)}</span>
+    </div>`).join('');
+
+  div.innerHTML = `
+    <div class="prose" style="margin-bottom:1.25rem"><p>${esc(p1.summary)}</p></div>
+    <div class="market-grid">${cats}</div>
+    <div style="margin-top:1rem">
+      <div style="font-family:var(--font-mono);font-size:0.6rem;letter-spacing:0.2em;text-transform:uppercase;color:var(--amber);margin-bottom:0.5rem">Key Market Tensions</div>
+      ${tensions}
+    </div>`;
+
+  return phaseWrapper(1, 'Market Landscape Analysis', div);
+}
+
+// ─── PHASE 2: GAP IDENTIFICATION ──────────────────────────────────────────────
+function renderPhase2(p2) {
+  const div = document.createElement('div');
+  if (!p2) return div;
+
+  const gaps = (p2.gaps || []).map(g => {
+    const feasibility = safeInt(g.techFeasibility, 1, 5, 1);
+    const score       = safeInt(g.overallScore, 0, 10, 0);
+
+    const pips = [1, 2, 3, 4, 5].map(i =>
+      `<div class="feasibility-pip ${i <= feasibility ? 'on' : ''}" aria-hidden="true"></div>`
+    ).join('');
+
+    return `
+      <div class="gap-card">
+        <div class="gap-card-header">
+          <span class="gap-card-icon" aria-hidden="true">${esc(g.icon || '🎵')}</span>
+          <span class="gap-card-title">${esc(g.title)}</span>
+          <span class="gap-score">Score: ${score}/10</span>
+        </div>
+        <div class="gap-card-body">
+          <div class="gap-field"><strong>Unmet Musical Need</strong>${esc(g.unmetNeed)}</div>
+          <div class="gap-field"><strong>Demand Signal</strong>${esc(g.demandSignal)}</div>
+          <div class="gap-field"><strong>Competitive Whitespace</strong>${esc(g.competitiveWhitespace)}</div>
+          <div class="gap-field"><strong>Cultural Resonance</strong>${esc(g.culturalResonance)}</div>
+          <div class="gap-field" style="grid-column:1/-1">
+            <strong>Tech Feasibility (${feasibility}/5)</strong>
+            <div class="feasibility-bar" role="meter" aria-valuenow="${feasibility}" aria-valuemin="1" aria-valuemax="5">${pips}</div>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+
+  div.innerHTML = gaps;
+  return phaseWrapper(2, 'Gap Identification', div);
+}
+
+// ─── PHASE 3: INSTRUMENT BRIEFS ───────────────────────────────────────────────
+function renderPhase3(p3) {
+  const div = document.createElement('div');
+  if (!p3) return div;
+
+  const briefs = (p3.briefs || []).map(b => {
+    const score = safeInt(b.opportunityScore, 0, 100, 50);
+    // SECURITY: tierColour uses an allow-list — safe for inline style attribute.
+    const colour = tierColour(b.priceTier);
+
+    return `
+      <div class="brief-card">
+        <div class="brief-header">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between">
+            <div>
+              <div class="brief-name">${esc(b.name)}</div>
+              <div class="brief-tagline">${esc(b.tagline)}</div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-family:var(--font-mono);font-size:0.6rem;letter-spacing:0.15em;color:var(--amber-pale);margin-bottom:0.25rem">OPPORTUNITY</div>
+              <div style="font-family:var(--font-display);font-size:2.5rem;font-weight:900;color:var(--amber);line-height:1">${score}</div>
+            </div>
+          </div>
+          <div class="brief-score-bar" style="margin-top:0.75rem" role="meter" aria-valuenow="${score}" aria-valuemin="0" aria-valuemax="100">
+            <div class="brief-score-fill" data-width="${score}" style="width:0%"></div>
+          </div>
+        </div>
+        <div class="brief-body">
+          <div class="brief-field"><strong>Target Player</strong>${esc(b.targetPlayer)}</div>
+          <div class="brief-field">
+            <strong>Price Tier</strong>
+            <span style="color:${colour};font-weight:600">${esc(b.priceTier)}</span>
+          </div>
+          <div class="brief-field brief-full"><strong>Core Innovation</strong>${esc(b.coreInnovation)}</div>
+          <div class="brief-field"><strong>Sound &amp; Expression</strong>${esc(b.soundCapabilities)}</div>
+          <div class="brief-field"><strong>Materials &amp; Form</strong>${esc(b.materials)}</div>
+          <div class="brief-field brief-full"><strong>Go-to-Market Path</strong>${esc(b.goToMarket)}</div>
+          <div class="brief-field brief-full" style="background:rgba(200,131,42,0.06);padding:0.75rem;border-left:3px solid var(--amber)">
+            <strong>Risks &amp; Open Questions</strong>${esc(b.risks)}
+          </div>
+        </div>
+      </div>`;
+  }).join('<div class="ornament-divider" aria-hidden="true">· · ·</div>');
+
+  div.innerHTML = briefs;
+  return phaseWrapper(3, 'Instrument Concept Design', div);
+}
+
+// ─── PHASE 4: RANKING ─────────────────────────────────────────────────────────
+function renderPhase4(p4) {
+  const div = document.createElement('div');
+  if (!p4) return div;
+
+  const rows = (p4.rankedOpportunities || []).map(r => {
+    const rank      = safeInt(r.rank,             1, 99, 0);
+    const impact    = safeInt(r.innovationImpact, 0, 10, 0);
+    const market    = safeInt(r.marketSize,        0, 10, 0);
+    const build     = safeInt(r.buildFeasibility,  0, 10, 0);
+    const timing    = safeInt(r.culturalTiming,    0, 10, 0);
+    const composite = safeInt(r.compositeScore,    0, 100, 0);
+
+    return `
+      <tr>
+        <td><div class="rank-num">#${rank}</div></td>
+        <td>
+          <strong>${esc(r.name)}</strong><br>
+          <span style="font-size:0.82rem;color:rgba(14,12,10,0.55)">${esc(r.rationale)}</span>
+        </td>
+        <td style="text-align:center">${impact}/10</td>
+        <td style="text-align:center">${market}/10</td>
+        <td style="text-align:center">${build}/10</td>
+        <td style="text-align:center">${timing}/10</td>
+        <td><span class="score-chip">${composite}</span></td>
+      </tr>`;
+  }).join('');
+
+  div.innerHTML = `
+    <table class="rank-table" aria-label="Opportunity ranking">
+      <thead>
+        <tr>
+          <th scope="col">Rank</th>
+          <th scope="col">Instrument</th>
+          <th scope="col">Innovation</th>
+          <th scope="col">Market</th>
+          <th scope="col">Feasibility</th>
+          <th scope="col">Timing</th>
+          <th scope="col">Score</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div style="margin-top:2rem;padding:1.5rem;border:1px solid var(--line);border-left:4px solid var(--amber-deep);background:rgba(200,131,42,0.04)">
+      <div style="font-family:var(--font-mono);font-size:0.6rem;letter-spacing:0.2em;text-transform:uppercase;color:var(--amber);margin-bottom:0.5rem">Synthesis &amp; Conclusion</div>
+      <p style="font-size:0.95rem;line-height:1.75">${esc(p4.conclusion)}</p>
+    </div>`;
+
+  return phaseWrapper(4, 'Prioritised Opportunity Ranking', div);
+}
+</script>
+</body>
+</html>
